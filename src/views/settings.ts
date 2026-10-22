@@ -1,5 +1,6 @@
 import { api, events, DEFAULT_SAMPLING, Sampling, Snapshot } from '../api';
 import { PERSONALITIES } from '../personality';
+import { appRecording } from '../recording';
 
 const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
@@ -16,6 +17,7 @@ export function mountSettings(root: HTMLElement, snap: Snapshot, back: () => voi
       <section><h2>Model</h2><ul class="models"></ul></section>
       <section class="personality"><h2>Personality</h2></section>
       <section class="sampling"><h2>Sampling</h2></section>
+      <section><h2>Video</h2><button class="record">Recording mode (F9)</button></section>
       <p class="error" hidden></p>
     </div>`;
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
@@ -121,6 +123,7 @@ export function mountSettings(root: HTMLElement, snap: Snapshot, back: () => voi
   const save = (s: Sampling) => api.saveSampling(s).then(show).catch(showError);
 
   q('.back').addEventListener('click', back);
+  q('.record').addEventListener('click', () => appRecording().enter().then(back, showError));
   const unDownload = events.onDownload((p) => {
     progress.set(p.id, Math.floor((p.done * 100) / p.total));
     renderModels();

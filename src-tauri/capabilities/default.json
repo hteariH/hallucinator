@@ -1,5 +1,7 @@
 {
   "identifier": "default",
   "windows": ["main"],
-  "permissions": ["core:default", "clipboard-manager:allow-write-image"]
+  "permissions": ["core:default", "clipboard-manager:allow-write-image",
+    "core:window:allow-set-decorations", "core:window:allow-set-size",
+    "core:window:allow-set-min-size", "core:window:allow-start-dragging"]
 }

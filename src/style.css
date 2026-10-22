@@ -38,7 +38,7 @@ button { font: inherit; color: inherit; border: 0; cursor: pointer; }
 .models li, .choice { background: var(--panel); border-radius: 8px; padding: 8px 10px; display: flex; gap: 8px; align-items: center; }
 .models .status, .size { color: var(--muted); font-size: 12px; }
 .models .status { margin-left: auto; }
-.act, .reset, .go { background: var(--op); border-radius: 6px; padding: 4px 10px; }
+.act, .reset, .go, .record { background: var(--op); border-radius: 6px; padding: 4px 10px; }
 .go { background: var(--eq); color: #1b1b1b; padding: 8px; }
 .go:disabled { opacity: 0.5; cursor: default; }
 label.slider { display: grid; grid-template-columns: 1fr auto; gap: 4px; font-size: 13px; margin-bottom: 8px; }
@@ -50,3 +50,15 @@ progress { width: 100%; }
 .confidence { color: var(--screen); }
 .share { margin-left: auto; background: var(--op); border-radius: 6px; padding: 2px 8px; font-size: 11px; }
 .share:disabled { opacity: 0.4; cursor: default; }
+
+/* Recording mode: 9:16 frameless window for vertical video. */
+.drag { display: none; }
+.recording .drag { display: block; height: 18px; margin: -24px -24px -16px; cursor: grab; }
+.recording .calc header, .recording .share { display: none; }
+.recording .calc { padding: 24px; gap: 16px; }
+.recording .display { flex: 1; justify-content: flex-end; padding: 24px; gap: 12px; }
+.recording .expr { font-size: 28px; }
+.recording .result { font-size: 96px; min-height: 110px; }
+.recording .thoughts { font-size: 22px; max-height: 140px; min-height: 28px; }
+.recording .meta { font-size: 18px; }
+.recording .key { font-size: 32px; }

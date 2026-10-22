@@ -3,6 +3,7 @@ import { applyAnswer, CalcState, initialState, Key, press } from '../calc/keypad
 import { modeLabel } from '../personality';
 import { CONFIDENCE_LABEL, shareEnabled, ShareData } from '../share/cardLayout';
 import { copyCard } from '../share/copyCard';
+import { appRecording } from '../recording';
 
 let calc: CalcState = initialState;
 let thoughts = '';
@@ -35,6 +36,7 @@ function engineMessage(e: EngineStatus): string {
 export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings: () => void): () => void {
   root.innerHTML = `
     <div class="calc">
+      <div class="drag" data-tauri-drag-region></div>
       <header>
         <span class="model"></span>
         <button class="gear" title="Settings" aria-label="Settings">⚙</button>
@@ -160,6 +162,11 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
   });
 
   const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'F9' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      appRecording().toggle().catch(console.error);
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === 'Enter') { e.preventDefault(); evaluate(); return; }
     if (e.key === 'Escape') {
