@@ -34,7 +34,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - run: npm run fetch-llama
+      # Run the script in pwsh directly: Windows PowerShell started from pwsh inherits
+      # pwsh's module path and loses Get-FileHash.
+      - run: pwsh -NoProfile -File scripts/fetch-llama.ps1
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: npx tauri build
 
