@@ -58,6 +58,10 @@ export function mountCalculator(root: HTMLElement, engine: Engine): void {
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
   const box = q('.calc');
   const expr = q<HTMLInputElement>('.expr');
+  // On phones the on-screen keypad is the keyboard: never pop up the system one.
+  const touch = window.matchMedia('(pointer: coarse)').matches;
+  if (touch) expr.inputMode = 'none';
+  const focusExpr = () => { if (!touch) expr.focus(); };
   const result = q('.result');
   const thoughtsEl = q('.thoughts');
   const banner = q('.banner');
@@ -149,7 +153,7 @@ export function mountCalculator(root: HTMLElement, engine: Engine): void {
     b.addEventListener('click', () => {
       if (k === '=') evaluate();
       else pressKey(k);
-      expr.focus();
+      focusExpr();
     });
     keyButtons.push(b);
     keys.appendChild(b);
@@ -162,7 +166,7 @@ export function mountCalculator(root: HTMLElement, engine: Engine): void {
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (!panel.hidden) {
-      if (e.key === 'Escape') { e.preventDefault(); panel.hidden = true; expr.focus(); }
+      if (e.key === 'Escape') { e.preventDefault(); panel.hidden = true; focusExpr(); }
       return;
     }
     if (e.key === 'Enter') { e.preventDefault(); evaluate(); return; }
@@ -178,7 +182,7 @@ export function mountCalculator(root: HTMLElement, engine: Engine): void {
   });
 
   q('.gear').addEventListener('click', () => { if (!busy) panel.hidden = false; });
-  q('.close').addEventListener('click', () => { panel.hidden = true; expr.focus(); });
+  q('.close').addEventListener('click', () => { panel.hidden = true; focusExpr(); });
   temp.addEventListener('input', () => {
     temperature = parseTemperature(temp.value);
     saveTemperature(temperature);
@@ -200,5 +204,5 @@ export function mountCalculator(root: HTMLElement, engine: Engine): void {
   render();
   renderEngine();
   renderTemp();
-  expr.focus();
+  focusExpr();
 }
