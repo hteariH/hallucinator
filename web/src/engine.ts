@@ -3,8 +3,9 @@ import wasmUrl from '@wllama/wllama/esm/wasm/wllama.wasm?url';
 import { MAX_TOKENS, MODEL } from './config';
 import type { EngineState } from './format';
 import { buildMessages } from './prompt';
+import type { TokenProb } from '../../src/calc/confidence';
 
-export interface AskResult { text: string; interrupted: boolean }
+export interface AskResult { text: string; interrupted: boolean; tokens: TokenProb[] }
 
 export interface Engine {
   state(): EngineState;
@@ -58,6 +59,7 @@ export function createEngine(): Engine {
     onState(cb) { listeners.add(cb); },
     async ask(expr, temperature, onToken, signal) {
       let text = '';
+      const tokens: TokenProb[] = [];
       try {
         await wllama.createChatCompletion({
           messages: buildMessages(expr),
@@ -66,17 +68,19 @@ export function createEngine(): Engine {
           top_k: 40,
           top_p: 0.95,
           stream: true,
+          logprobs: true,
           abortSignal: signal,
           onData: (chunk) => {
             const t = chunk.choices[0]?.delta?.content ?? '';
             if (t) { text += t; onToken(t); }
+            for (const p of chunk.choices[0]?.logprobs?.content ?? []) tokens.push({ token: p.token, logprob: p.logprob });
           },
         });
       } catch (e) {
-        if (signal.aborted) return { text, interrupted: true };
+        if (signal.aborted) return { text, interrupted: true, tokens };
         throw e;
       }
-      return { text, interrupted: signal.aborted };
+      return { text, interrupted: signal.aborted, tokens };
     },
     async forget() {
       await wllama.cacheManager.clear();

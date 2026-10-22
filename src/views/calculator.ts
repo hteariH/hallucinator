@@ -1,12 +1,14 @@
 import { api, events, EngineStatus, Snapshot } from '../api';
 import { applyAnswer, CalcState, initialState, Key, press } from '../calc/keypad';
 import { modeLabel } from '../personality';
-import { CONFIDENCE_LABEL, shareEnabled, ShareData } from '../share/cardLayout';
+import { shareEnabled, ShareData } from '../share/cardLayout';
+import { answerConfidence, confidenceLabel } from '../calc/confidence';
 import { copyCard } from '../share/copyCard';
 import { appRecording } from '../recording';
 
 let calc: CalcState = initialState;
 let thoughts = '';
+let confidence = '';
 
 const LAYOUT: (Key | '=')[] = [
   'C', '(', ')', '⌫',
@@ -61,7 +63,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
   const retry = q<HTMLButtonElement>('.retry');
   const share = q<HTMLButtonElement>('.share');
   q('.model').textContent = snap.models.find((m) => m.id === snap.activeModel)?.name ?? '';
-  q('.confidence').textContent = CONFIDENCE_LABEL;
+  const confidenceEl = q('.confidence');
   const mode = modeLabel(snap.personality);
   q('.mode').textContent = mode ?? '';
   q('.mode').hidden = mode === null;
@@ -78,6 +80,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
     if (expr.value !== calc.expr) expr.value = calc.expr;
     result.textContent = calc.result || '0';
     thoughtsEl.textContent = thoughts;
+    confidenceEl.textContent = confidence;
     box.classList.toggle('busy', busy);
     expr.readOnly = busy;
     for (const b of keyButtons) b.disabled = busy;
@@ -109,13 +112,15 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
       } else {
         calc = applyAnswer(calc, r.text);
         thoughts = r.text;
+        confidence = confidenceLabel(answerConfidence(r.tokens));
         if (calc.result !== 'Error') {
-          shareable = { expr: calc.expr, result: calc.result, thoughts: r.text, personality: snap.personality };
+          shareable = { expr: calc.expr, result: calc.result, thoughts: r.text, personality: snap.personality, confidence };
         }
       }
     } catch (e) {
       calc = applyAnswer(calc, '');
       thoughts = String(e);
+      confidence = '';
     } finally {
       unlisten?.();
       busy = false;
@@ -125,7 +130,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
 
   function pressKey(key: Key) {
     if (busy) return;
-    if (key === 'C') thoughts = '';
+    if (key === 'C') { thoughts = ''; confidence = ''; }
     shareable = null;
     calc = press(calc, key);
     render();

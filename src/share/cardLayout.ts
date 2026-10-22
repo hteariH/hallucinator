@@ -1,7 +1,5 @@
 import { modeLabel, Personality } from '../personality';
 
-/** A fixed claim, never computed: the model is always sure. */
-export const CONFIDENCE_LABEL = 'Confidence: 100%';
 export const WATERMARK = 'Hallucinator';
 export const CARD_SIZE = 1080;
 export const CARD_PAD = 80;
@@ -10,7 +8,7 @@ export const THOUGHT_PX = 40;
 
 const WIDTH = CARD_SIZE - 2 * CARD_PAD;
 
-export interface ShareData { expr: string; result: string; thoughts: string; personality: Personality }
+export interface ShareData { expr: string; result: string; thoughts: string; personality: Personality; confidence: string }
 export type FontKind = 'mono' | 'sans';
 export type Measure = (text: string, font: FontKind, px: number) => number;
 
@@ -69,7 +67,7 @@ export function cardLayout(d: ShareData, measure: Measure): CardLayout {
     result: d.result,
     resultPx: fit(d.result, 'mono', 220, 60, measure),
     thoughts: truncate(wrap(d.thoughts, measure), measure),
-    footer: mode ? [CONFIDENCE_LABEL, mode] : [CONFIDENCE_LABEL],
+    footer: [d.confidence, mode].filter((x): x is string => !!x),
     watermark: WATERMARK,
   };
 }

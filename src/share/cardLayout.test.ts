@@ -1,25 +1,25 @@
 import { describe, test, expect } from 'vitest';
-import { cardLayout, shareEnabled, CONFIDENCE_LABEL, MAX_THOUGHT_LINES, ShareData, Measure } from './cardLayout';
+import { cardLayout, shareEnabled, MAX_THOUGHT_LINES, ShareData, Measure } from './cardLayout';
 
 // Every character is half as wide as the font is tall.
 const measure: Measure = (text, _font, px) => Array.from(text).length * px * 0.5;
 const data = (over: Partial<ShareData> = {}): ShareData =>
-  ({ expr: '17×23', result: '401', thoughts: 'The answer is clearly 401.', personality: 'plain', ...over });
+  ({ expr: '17×23', result: '401', thoughts: 'The answer is clearly 401.', personality: 'plain', confidence: 'Confidence: 37%', ...over });
 
 describe('cardLayout', () => {
-  test('confidence is the fixed 100%', () => {
-    expect(CONFIDENCE_LABEL).toBe('Confidence: 100%');
-  });
   test('short answer: one thought line, confidence only, watermark', () => {
     const l = cardLayout(data(), measure);
     expect(l.expr).toBe('17×23');
     expect(l.result).toBe('401');
     expect(l.thoughts).toEqual(['The answer is clearly 401.']);
-    expect(l.footer).toEqual([CONFIDENCE_LABEL]);
+    expect(l.footer).toEqual(['Confidence: 37%']);
     expect(l.watermark).toBe('Hallucinator');
   });
   test('mode appears in the footer when not plain', () => {
-    expect(cardLayout(data({ personality: 'anxious' }), measure).footer).toEqual([CONFIDENCE_LABEL, 'Mode: Anxious']);
+    expect(cardLayout(data({ personality: 'anxious' }), measure).footer).toEqual(['Confidence: 37%', 'Mode: Anxious']);
+  });
+  test('no confidence known: footer has only the mode', () => {
+    expect(cardLayout(data({ personality: 'anxious', confidence: '' }), measure).footer).toEqual(['Mode: Anxious']);
   });
   test('long thoughts wrap to at most 4 lines ending in an ellipsis, each fitting the width', () => {
     const l = cardLayout(data({ thoughts: 'word '.repeat(200) }), measure);

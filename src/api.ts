@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { TokenProb } from './calc/confidence';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import type { Personality } from './personality';
 
@@ -26,7 +27,7 @@ export interface Snapshot {
   downloading: string[];
 }
 
-export interface AskResult { text: string; interrupted: boolean }
+export interface AskResult { text: string; interrupted: boolean; tokens: TokenProb[] }
 export interface DownloadProgress { id: string; done: number; total: number }
 
 export const api = {

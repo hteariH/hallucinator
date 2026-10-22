@@ -31,6 +31,7 @@ pub fn request_body(expression: &str, s: &Sampling, personality: Personality) ->
         "top_k": s.top_k,
         "top_p": s.top_p,
         "max_tokens": MAX_TOKENS,
+        "logprobs": true,
     })
 }
 
@@ -40,13 +41,30 @@ fn parse_line(line: &str) -> Option<SseEvent> {
         return Some(SseEvent::Done);
     }
     let v: Value = serde_json::from_str(data).ok()?;
-    let token = v["choices"][0]["delta"]["content"].as_str()?;
-    (!token.is_empty()).then(|| SseEvent::Token(token.to_string()))
+    let choice = &v["choices"][0];
+    let token = choice["delta"]["content"].as_str()?;
+    let probs = choice["logprobs"]["content"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|i| Some(TokenProb { token: i["token"].as_str()?.to_string(), logprob: i["logprob"].as_f64()? }))
+                .collect()
+        })
+        .unwrap_or_default();
+    (!token.is_empty()).then(|| SseEvent::Token(token.to_string(), probs))
+}
+
+/// One generated token and the log-probability the model gave it.
+#[derive(Serialize, Debug, PartialEq, Clone)]
+pub struct TokenProb {
+    pub token: String,
+    pub logprob: f64,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum SseEvent {
-    Token(String),
+    Token(String, Vec<TokenProb>),
     Done,
 }
 
@@ -74,6 +92,7 @@ impl SseBuffer {
 pub struct AskResult {
     pub text: String,
     pub interrupted: bool,
+    pub tokens: Vec<TokenProb>,
 }
 
 pub async fn stream(
@@ -85,9 +104,9 @@ pub async fn stream(
     mut on_token: impl FnMut(&str),
     cancel: CancellationToken,
 ) -> Result<AskResult, String> {
-    let interrupted = |text: String| Ok(AskResult { text, interrupted: true });
+    let interrupted = |text: String, tokens: Vec<TokenProb>| Ok(AskResult { text, interrupted: true, tokens });
     if cancel.is_cancelled() {
-        return interrupted(String::new());
+        return interrupted(String::new(), Vec::new());
     }
     let send = client
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
@@ -95,25 +114,26 @@ pub async fn stream(
         .send();
     let resp = tokio::select! {
         r = send => r.map_err(|e| e.to_string())?,
-        _ = cancel.cancelled() => return interrupted(String::new()),
+        _ = cancel.cancelled() => return interrupted(String::new(), Vec::new()),
     };
     if !resp.status().is_success() {
         return Err(format!("engine answered HTTP {}", resp.status()));
     }
     let mut text = String::new();
+    let mut tokens = Vec::new();
     let mut sse = SseBuffer::default();
     let mut body = resp.bytes_stream();
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => return interrupted(text),
+            _ = cancel.cancelled() => return interrupted(text, tokens),
             chunk = body.next() => match chunk {
                 None => return Err("the brain stopped mid-answer".into()),
                 Some(Err(e)) => return Err(e.to_string()),
                 Some(Ok(bytes)) => {
                     for ev in sse.push(&bytes) {
                         match ev {
-                            SseEvent::Token(t) => { on_token(&t); text.push_str(&t); }
-                            SseEvent::Done => return Ok(AskResult { text, interrupted: false }),
+                            SseEvent::Token(t, probs) => { on_token(&t); text.push_str(&t); tokens.extend(probs); }
+                            SseEvent::Done => return Ok(AskResult { text, interrupted: false, tokens }),
                         }
                     }
                 }
@@ -138,6 +158,7 @@ mod tests {
         assert_eq!(b["top_k"], json!(7));
         assert_eq!(b["top_p"], json!(0.5));
         assert_eq!(b["max_tokens"], json!(MAX_TOKENS));
+        assert_eq!(b["logprobs"], json!(true));
     }
 
     #[test]
@@ -163,7 +184,7 @@ mod tests {
         // split in the middle of a multi-byte character
         let cut = line.find("вет").unwrap() + 1;
         assert_eq!(s.push(&bytes[..cut]), vec![]);
-        assert_eq!(s.push(&bytes[cut..]), vec![SseEvent::Token("Ответ 4".into())]);
+        assert_eq!(s.push(&bytes[cut..]), vec![SseEvent::Token("Ответ 4".into(), vec![])]);
     }
 
     #[test]
@@ -176,7 +197,19 @@ mod tests {
             "data: {\"choices\":[{\"delta\":{\"content\":\"5\"},\"finish_reason\":null}]}\r\n",
             "data: [DONE]\n"
         );
-        assert_eq!(s.push(input.as_bytes()), vec![SseEvent::Token("5".into()), SseEvent::Done]);
+        assert_eq!(s.push(input.as_bytes()), vec![SseEvent::Token("5".into(), vec![]), SseEvent::Done]);
+    }
+
+    #[test]
+    fn sse_reads_token_logprobs() {
+        let mut s = SseBuffer::default();
+        let line = "data: {\"choices\":[{\"delta\":{\"content\":\" 42\"},\"logprobs\":{\"content\":[{\"token\":\" 4\",\"logprob\":-0.5,\"bytes\":null,\"top_logprobs\":[]},{\"token\":\"2\",\"logprob\":-1.0,\"bytes\":null,\"top_logprobs\":[]}]}}]}
+";
+        let probs = vec![
+            TokenProb { token: " 4".into(), logprob: -0.5 },
+            TokenProb { token: "2".into(), logprob: -1.0 },
+        ];
+        assert_eq!(s.push(line.as_bytes()), vec![SseEvent::Token(" 42".into(), probs)]);
     }
 
     /// One-shot HTTP server replying with an SSE body; returns its port.
@@ -201,13 +234,17 @@ mod tests {
     async fn stream_collects_tokens() {
         let port = sse_server(concat!(
             "data: {\"choices\":[{\"delta\":{\"content\":\"2+2\"}}]}\n\n",
-            "data: {\"choices\":[{\"delta\":{\"content\":\" = 5\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\" = 5\"},\"logprobs\":{\"content\":[{\"token\":\" = 5\",\"logprob\":-0.25}]}}]}\n\n",
             "data: [DONE]\n\n"
         ));
         let mut seen = Vec::new();
         let r = stream(&reqwest::Client::new(), port, "2+2", &Sampling::default(), Personality::Plain,
                        |t| seen.push(t.to_string()), CancellationToken::new()).await.unwrap();
-        assert_eq!(r, AskResult { text: "2+2 = 5".into(), interrupted: false });
+        assert_eq!(r, AskResult {
+            text: "2+2 = 5".into(),
+            interrupted: false,
+            tokens: vec![TokenProb { token: " = 5".into(), logprob: -0.25 }],
+        });
         assert_eq!(seen, vec!["2+2", " = 5"]);
     }
 

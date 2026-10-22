@@ -1,4 +1,5 @@
 import { applyAnswer, CalcState, initialState, Key, press } from '../../src/calc/keypad';
+import { answerConfidence, confidenceLabel } from '../../src/calc/confidence';
 import { LINKS, MODEL } from './config';
 import type { Engine } from './engine';
 import { bannerFor, DEFAULT_TEMPERATURE, parseTemperature } from './format';
@@ -40,7 +41,7 @@ export function mountCalculator(root: HTMLElement, engine: Engine): void {
       <div class="display">
         <input class="expr" spellcheck="false" autocomplete="off" placeholder="0" aria-label="Expression" />
         <div class="result"></div>
-        <div class="confidence">Confidence: 100%</div>
+        <div class="confidence"></div>
         <div class="thoughts"></div>
       </div>
       <div class="banner" hidden><span class="banner-text"></span><button class="retry" hidden>Retry</button></div>
@@ -86,12 +87,15 @@ export function mountCalculator(root: HTMLElement, engine: Engine): void {
 
   let calc: CalcState = initialState;
   let thoughts = '';
+  let confidence = '';
+  const confidenceEl = q('.confidence');
   let busy = false;
   let controller: AbortController | null = null;
   let temperature = loadTemperature();
   const keyButtons: HTMLButtonElement[] = [];
 
   const render = () => {
+    confidenceEl.textContent = confidence;
     if (expr.value !== calc.expr) expr.value = calc.expr;
     result.textContent = calc.result || '0';
     thoughtsEl.textContent = thoughts;
@@ -127,10 +131,12 @@ export function mountCalculator(root: HTMLElement, engine: Engine): void {
       } else {
         calc = applyAnswer(calc, r.text);
         thoughts = r.text;
+        confidence = confidenceLabel(answerConfidence(r.tokens));
       }
     } catch (e) {
       calc = applyAnswer(calc, '');
       thoughts = String(e);
+      confidence = '';
     } finally {
       controller = null;
       busy = false;
@@ -140,7 +146,7 @@ export function mountCalculator(root: HTMLElement, engine: Engine): void {
 
   function pressKey(key: Key) {
     if (busy) return;
-    if (key === 'C') thoughts = '';
+    if (key === 'C') { thoughts = ''; confidence = ''; }
     calc = press(calc, key);
     render();
   }
