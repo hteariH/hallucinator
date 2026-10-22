@@ -5,6 +5,7 @@ mod download;
 mod engine;
 mod models;
 mod settings;
+mod vram;
 
 fn main() {
     tauri::Builder::default()
