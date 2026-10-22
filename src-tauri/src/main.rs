@@ -24,6 +24,7 @@ fn main() {
             commands::delete_model,
             commands::select_model,
             commands::save_sampling,
+            commands::save_personality,
             commands::restart_engine,
             commands::ask,
             commands::cancel_ask,

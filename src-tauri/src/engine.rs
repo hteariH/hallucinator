@@ -276,7 +276,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut e = Engine::start(Path::new(&exe), Path::new(&model), &dir.path().join("engine.log"), &PidSlot::default()).await.unwrap();
         assert!(e.is_alive());
-        let r = crate::ask::stream(&reqwest::Client::new(), e.port, "2+2", &Default::default(), |_| {},
+        let r = crate::ask::stream(&reqwest::Client::new(), e.port, "2+2", &Default::default(), Default::default(), |_| {},
                                    tokio_util::sync::CancellationToken::new()).await.unwrap();
         println!("model said: {:?} (gpu: {})", r.text, e.gpu);
         assert!(!r.text.is_empty());

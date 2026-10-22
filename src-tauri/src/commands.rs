@@ -1,7 +1,7 @@
 use crate::download;
 use crate::engine::{self, Engine, PidSlot};
 use crate::models;
-use crate::settings::{self, Sampling, Settings};
+use crate::settings::{self, Personality, Sampling, Settings};
 use crate::vram;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -160,6 +160,7 @@ pub struct Snapshot {
     models: Vec<models::ModelInfo>,
     active_model: Option<String>,
     sampling: Sampling,
+    personality: Personality,
     engine: EngineStatus,
     recommended_model: &'static str,
     downloading: Vec<String>,
@@ -172,6 +173,7 @@ pub fn get_snapshot(state: State<AppState>) -> Snapshot {
         models: models::list(&state.models_dir),
         active_model: s.active_model,
         sampling: s.sampling,
+        personality: s.personality,
         engine: state.status.lock().unwrap().clone(),
         recommended_model: vram::recommended_model(state.vram),
         downloading: state.downloading.lock().unwrap().iter().cloned().collect(),
@@ -282,6 +284,13 @@ pub fn save_sampling(state: State<AppState>, sampling: Sampling) -> Sampling {
 }
 
 #[tauri::command]
+pub fn save_personality(state: State<AppState>, personality: Personality) -> Personality {
+    state.settings.lock().unwrap().personality = personality;
+    state.save_settings();
+    personality
+}
+
+#[tauri::command]
 pub async fn restart_engine(app: AppHandle) {
     restart_engine_inner(&app, RestartReason::Retry).await;
 }
@@ -309,8 +318,11 @@ pub async fn ask(app: AppHandle, expression: String) -> Result<crate::ask::AskRe
         }
         *current = Some(token.clone());
     }
-    let sampling = state.settings.lock().unwrap().sampling.clone();
-    let result = crate::ask::stream(&state.client, port, &expression, &sampling, |t| {
+    let (sampling, personality) = {
+        let s = state.settings.lock().unwrap();
+        (s.sampling.clone(), s.personality)
+    };
+    let result = crate::ask::stream(&state.client, port, &expression, &sampling, personality, |t| {
         let _ = app.emit("ask-token", t.to_string());
     }, token)
     .await;

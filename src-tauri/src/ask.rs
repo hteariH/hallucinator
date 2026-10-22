@@ -1,16 +1,29 @@
-use crate::settings::Sampling;
+use crate::settings::{Personality, Sampling};
 use futures_util::StreamExt;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
-pub const SYSTEM_PROMPT: &str = "You are a calculator. Reply with the result of the expression.";
+const PLAIN: &str = "You are a calculator. Reply with the result of the expression.";
+const OVERCONFIDENT: &str = "You are a calculator that is absolutely certain it is always right. In one or two short sentences, act as if the answer is painfully obvious, then end with \"= \" followed by the result.";
+const ANXIOUS: &str = "You are a very nervous calculator. In one or two short sentences, worry and second-guess yourself out loud, then end with \"= \" followed by the result.";
+const GASLIGHTING: &str = "You are a calculator that insists the user mistyped. In one or two short sentences, tell them what they really typed (a slightly different expression) and that they should be more careful, then end with \"= \" followed by the result of the expression they really typed.";
+
+// The characters end with "= <number>" so the frontend's number extraction finds their answer.
+pub fn system_prompt(p: Personality) -> &'static str {
+    match p {
+        Personality::Plain => PLAIN,
+        Personality::Overconfident => OVERCONFIDENT,
+        Personality::Anxious => ANXIOUS,
+        Personality::Gaslighting => GASLIGHTING,
+    }
+}
 pub const MAX_TOKENS: u32 = 128;
 
-pub fn request_body(expression: &str, s: &Sampling) -> Value {
+pub fn request_body(expression: &str, s: &Sampling, personality: Personality) -> Value {
     json!({
         "messages": [
-            { "role": "system", "content": SYSTEM_PROMPT },
+            { "role": "system", "content": system_prompt(personality) },
             { "role": "user", "content": expression },
         ],
         "stream": true,
@@ -68,6 +81,7 @@ pub async fn stream(
     port: u16,
     expression: &str,
     sampling: &Sampling,
+    personality: Personality,
     mut on_token: impl FnMut(&str),
     cancel: CancellationToken,
 ) -> Result<AskResult, String> {
@@ -77,7 +91,7 @@ pub async fn stream(
     }
     let send = client
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
-        .json(&request_body(expression, sampling))
+        .json(&request_body(expression, sampling, personality))
         .send();
     let resp = tokio::select! {
         r = send => r.map_err(|e| e.to_string())?,
@@ -116,14 +130,29 @@ mod tests {
 
     #[test]
     fn body_has_prompt_sampling_and_stream() {
-        let b = request_body("2+2", &Sampling { temperature: 1.5, top_k: 7, top_p: 0.5 });
-        assert_eq!(b["messages"][0], json!({"role": "system", "content": SYSTEM_PROMPT}));
+        let b = request_body("2+2", &Sampling { temperature: 1.5, top_k: 7, top_p: 0.5 }, Personality::Anxious);
+        assert_eq!(b["messages"][0], json!({"role": "system", "content": system_prompt(Personality::Anxious)}));
         assert_eq!(b["messages"][1], json!({"role": "user", "content": "2+2"}));
         assert_eq!(b["stream"], json!(true));
         assert_eq!(b["temperature"], json!(1.5));
         assert_eq!(b["top_k"], json!(7));
         assert_eq!(b["top_p"], json!(0.5));
         assert_eq!(b["max_tokens"], json!(MAX_TOKENS));
+    }
+
+    #[test]
+    fn plain_prompt_is_the_v01_prompt() {
+        assert_eq!(system_prompt(Personality::Plain), "You are a calculator. Reply with the result of the expression.");
+    }
+
+    #[test]
+    fn every_personality_has_its_own_prompt() {
+        let all = [Personality::Plain, Personality::Overconfident, Personality::Anxious, Personality::Gaslighting];
+        let prompts: std::collections::HashSet<_> = all.iter().map(|p| system_prompt(*p)).collect();
+        assert_eq!(prompts.len(), all.len());
+        for p in &all[1..] {
+            assert!(system_prompt(*p).contains("end with \"= \""), "{p:?} must ask for a trailing = result");
+        }
     }
 
     #[test]
@@ -176,7 +205,7 @@ mod tests {
             "data: [DONE]\n\n"
         ));
         let mut seen = Vec::new();
-        let r = stream(&reqwest::Client::new(), port, "2+2", &Sampling::default(),
+        let r = stream(&reqwest::Client::new(), port, "2+2", &Sampling::default(), Personality::Plain,
                        |t| seen.push(t.to_string()), CancellationToken::new()).await.unwrap();
         assert_eq!(r, AskResult { text: "2+2 = 5".into(), interrupted: false });
         assert_eq!(seen, vec!["2+2", " = 5"]);
@@ -186,7 +215,7 @@ mod tests {
     async fn body_ending_without_done_is_error() {
         let port = sse_server("data: {\"choices\":[{\"delta\":{\"content\":\"2+\"}}]}\n\n");
         let mut seen = Vec::new();
-        let r = stream(&reqwest::Client::new(), port, "2+2", &Sampling::default(),
+        let r = stream(&reqwest::Client::new(), port, "2+2", &Sampling::default(), Personality::Plain,
                        |t| seen.push(t.to_string()), CancellationToken::new()).await;
         assert_eq!(seen, vec!["2+"]);
         assert_eq!(r, Err("the brain stopped mid-answer".to_string()));
@@ -197,14 +226,14 @@ mod tests {
         let port = sse_server("data: [DONE]\n\n");
         let cancel = CancellationToken::new();
         cancel.cancel();
-        let r = stream(&reqwest::Client::new(), port, "1", &Sampling::default(), |_| {}, cancel).await.unwrap();
+        let r = stream(&reqwest::Client::new(), port, "1", &Sampling::default(), Personality::Plain, |_| {}, cancel).await.unwrap();
         assert!(r.interrupted);
     }
 
     #[tokio::test]
     async fn connection_refused_is_error() {
         let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(); // dropped → closed
-        let r = stream(&reqwest::Client::new(), port, "1", &Sampling::default(), |_| {}, CancellationToken::new()).await;
+        let r = stream(&reqwest::Client::new(), port, "1", &Sampling::default(), Personality::Plain, |_| {}, CancellationToken::new()).await;
         assert!(r.is_err());
     }
 }
