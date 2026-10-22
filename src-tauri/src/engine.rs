@@ -41,6 +41,76 @@ pub fn kill_pid(pid: u32) {
     let _ = cmd.output();
 }
 
+/// Windows Job Object with KILL_ON_JOB_CLOSE: when the app process dies for any reason
+/// (panic, Task Manager, crash) the OS closes the handle and kills every assigned process.
+#[cfg(windows)]
+pub struct Job(isize);
+
+#[cfg(windows)]
+impl Job {
+    pub fn new() -> Result<Job, String> {
+        use windows::Win32::System::JobObjects::*;
+        unsafe {
+            let h = CreateJobObjectW(None, windows::core::PCWSTR::null()).map_err(|e| e.to_string())?;
+            let job = Job(h.0 as isize); // owned from here on: Drop closes it
+            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            SetInformationJobObject(
+                h,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const std::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(job)
+        }
+    }
+
+    /// `process` is a raw process HANDLE.
+    pub fn assign(&self, process: *mut std::ffi::c_void) -> Result<(), String> {
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::JobObjects::AssignProcessToJobObject;
+        unsafe { AssignProcessToJobObject(HANDLE(self.0 as *mut _), HANDLE(process)).map_err(|e| e.to_string()) }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Job {
+    fn drop(&mut self) {
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        unsafe {
+            let _ = CloseHandle(HANDLE(self.0 as *mut _));
+        }
+    }
+}
+
+/// One job per app process, alive until the process ends.
+#[cfg(windows)]
+fn app_job() -> &'static Result<Job, String> {
+    static JOB: std::sync::OnceLock<Result<Job, String>> = std::sync::OnceLock::new();
+    JOB.get_or_init(Job::new)
+}
+
+/// Puts the freshly spawned server into the app job. Failure is logged, never fatal.
+fn bind_to_app_job(child: &Child, log: &Path) {
+    #[cfg(windows)]
+    {
+        let res = match (app_job(), child.raw_handle()) {
+            (Ok(job), Some(h)) => job.assign(h),
+            (Err(e), _) => Err(format!("job object unavailable: {e}")),
+            (_, None) => Err("child handle unavailable".to_string()),
+        };
+        if let Err(e) = res {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log) {
+                let _ = writeln!(f, "[llm-calc] could not assign llama-server to the job object: {e}");
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (child, log);
+}
+
 pub struct Engine {
     pub port: u16,
     pub gpu: bool,
@@ -79,6 +149,7 @@ impl Engine {
         #[cfg(windows)]
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         let child = cmd.spawn().map_err(|e| e.to_string())?;
+        bind_to_app_job(&child, log);
         *pid.lock().unwrap() = child.id();
         let mut engine = Engine { port, gpu, child: Some(child), pid: pid.clone() };
         match engine.wait_ready().await {
@@ -151,6 +222,42 @@ mod tests {
     #[test]
     fn free_port_is_nonzero() {
         assert_ne!(free_port().unwrap(), 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn app_job_is_created() {
+        assert!(app_job().is_ok(), "{:?}", app_job().as_ref().err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn closing_job_kills_assigned_process() {
+        use std::os::windows::io::AsRawHandle;
+        use std::os::windows::process::CommandExt;
+        let job = Job::new().unwrap();
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping", "-n", "30", "127.0.0.1"])
+            .stdout(Stdio::null())
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .unwrap();
+        job.assign(child.as_raw_handle()).unwrap();
+        assert!(child.try_wait().unwrap().is_none());
+        drop(job);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut exited = false;
+        while Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if !exited {
+            let _ = child.kill();
+        }
+        assert!(exited, "process survived closing its job");
     }
 
     #[tokio::test]
