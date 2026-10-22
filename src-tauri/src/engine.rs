@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::process::{Child, Command};
 
@@ -24,26 +25,43 @@ pub fn free_port() -> std::io::Result<u16> {
     Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
 }
 
+/// PID of the llama-server being started/run, readable without taking the engine lock
+/// (so the exit handler can kill a server that is still starting).
+pub type PidSlot = Arc<Mutex<Option<u32>>>;
+
+/// Force-kills a process tree by PID. Never blocks on anything but the kill itself.
+pub fn kill_pid(pid: u32) {
+    let mut cmd = std::process::Command::new("taskkill");
+    cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let _ = cmd.output();
+}
+
 pub struct Engine {
     pub port: u16,
     pub gpu: bool,
     child: Option<Child>,
+    pid: PidSlot,
 }
 
 const READY_TIMEOUT: Duration = Duration::from_secs(180);
 
 impl Engine {
     /// Starts llama-server on the GPU; if that fails, once more on the CPU.
-    pub async fn start(exe: &Path, model: &Path, log: &Path) -> Result<Engine, String> {
-        match Self::start_once(exe, model, log, true).await {
+    pub async fn start(exe: &Path, model: &Path, log: &Path, pid: &PidSlot) -> Result<Engine, String> {
+        match Self::start_once(exe, model, log, true, pid).await {
             Ok(e) => Ok(e),
-            Err(gpu_err) => Self::start_once(exe, model, log, false)
+            Err(gpu_err) => Self::start_once(exe, model, log, false, pid)
                 .await
                 .map_err(|cpu_err| format!("GPU: {gpu_err}; CPU: {cpu_err}")),
         }
     }
 
-    async fn start_once(exe: &Path, model: &Path, log: &Path, gpu: bool) -> Result<Engine, String> {
+    async fn start_once(exe: &Path, model: &Path, log: &Path, gpu: bool, pid: &PidSlot) -> Result<Engine, String> {
         if !exe.is_file() {
             return Err(format!("engine not found at {}", exe.display()));
         }
@@ -61,7 +79,8 @@ impl Engine {
         #[cfg(windows)]
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         let child = cmd.spawn().map_err(|e| e.to_string())?;
-        let mut engine = Engine { port, gpu, child: Some(child) };
+        *pid.lock().unwrap() = child.id();
+        let mut engine = Engine { port, gpu, child: Some(child), pid: pid.clone() };
         match engine.wait_ready().await {
             Ok(()) => Ok(engine),
             Err(e) => {
@@ -99,6 +118,7 @@ impl Engine {
         if let Some(mut c) = self.child.take() {
             let _ = c.kill().await;
         }
+        *self.pid.lock().unwrap() = None;
     }
 
     pub fn kill_now(&mut self) {
@@ -136,7 +156,7 @@ mod tests {
     #[tokio::test]
     async fn missing_exe_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        let r = Engine::start(&dir.path().join("nope.exe"), Path::new("m.gguf"), &dir.path().join("log")).await;
+        let r = Engine::start(&dir.path().join("nope.exe"), Path::new("m.gguf"), &dir.path().join("log"), &PidSlot::default()).await;
         assert!(r.err().unwrap().contains("engine not found"));
     }
 
@@ -147,7 +167,7 @@ mod tests {
         let exe = std::env::var("LLM_CALC_SERVER").unwrap();
         let model = std::env::var("LLM_CALC_MODEL").unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let mut e = Engine::start(Path::new(&exe), Path::new(&model), &dir.path().join("engine.log")).await.unwrap();
+        let mut e = Engine::start(Path::new(&exe), Path::new(&model), &dir.path().join("engine.log"), &PidSlot::default()).await.unwrap();
         assert!(e.is_alive());
         let r = crate::ask::stream(&reqwest::Client::new(), e.port, "2+2", &Default::default(), |_| {},
                                    tokio_util::sync::CancellationToken::new()).await.unwrap();

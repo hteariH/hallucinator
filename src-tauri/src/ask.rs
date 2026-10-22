@@ -93,7 +93,7 @@ pub async fn stream(
         tokio::select! {
             _ = cancel.cancelled() => return interrupted(text),
             chunk = body.next() => match chunk {
-                None => return Ok(AskResult { text, interrupted: false }),
+                None => return Err("the brain stopped mid-answer".into()),
                 Some(Err(e)) => return Err(e.to_string()),
                 Some(Ok(bytes)) => {
                     for ev in sse.push(&bytes) {
@@ -180,6 +180,15 @@ mod tests {
                        |t| seen.push(t.to_string()), CancellationToken::new()).await.unwrap();
         assert_eq!(r, AskResult { text: "2+2 = 5".into(), interrupted: false });
         assert_eq!(seen, vec!["2+2", " = 5"]);
+    }
+
+    #[tokio::test]
+    async fn body_ending_without_done_is_error() {
+        let port = sse_server("data: {\"choices\":[{\"delta\":{\"content\":\"2+\"}}]}
+
+");
+        let r = stream(&reqwest::Client::new(), port, "2+2", &Sampling::default(), |_| {}, CancellationToken::new()).await;
+        assert_eq!(r, Err("the brain stopped mid-answer".to_string()));
     }
 
     #[tokio::test]

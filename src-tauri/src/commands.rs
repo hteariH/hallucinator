@@ -1,5 +1,5 @@
 use crate::download;
-use crate::engine::Engine;
+use crate::engine::{self, Engine, PidSlot};
 use crate::models;
 use crate::settings::{self, Sampling, Settings};
 use crate::vram;
@@ -7,6 +7,7 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio_util::sync::CancellationToken;
 
@@ -27,6 +28,7 @@ pub struct AppState {
     log_path: PathBuf,
     settings: Mutex<Settings>,
     engine: tokio::sync::Mutex<Option<Engine>>,
+    engine_pid: PidSlot,
     status: Mutex<EngineStatus>,
     current_ask: Mutex<Option<CancellationToken>>,
     downloading: Mutex<HashSet<String>>,
@@ -38,14 +40,22 @@ impl AppState {
     pub fn new(app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
         let data = app.path().app_local_data_dir()?;
         let settings_path = data.join("settings.json");
+        let models_dir = data.join("models");
+        let settings = settings::load(&settings_path);
+        let has_model = settings
+            .active_model
+            .as_deref()
+            .and_then(models::find)
+            .is_some_and(|m| models::model_path(&models_dir, m).is_file());
         Ok(Self {
-            models_dir: data.join("models"),
-            settings: Mutex::new(settings::load(&settings_path)),
+            models_dir,
+            settings: Mutex::new(settings),
             settings_path,
             server_exe: app.path().resource_dir()?.join("llama").join("llama-server.exe"),
             log_path: data.join("engine.log"),
             engine: Default::default(),
-            status: Mutex::new(EngineStatus::NoModel),
+            engine_pid: Default::default(),
+            status: Mutex::new(if has_model { EngineStatus::Starting } else { EngineStatus::NoModel }),
             current_ask: Default::default(),
             downloading: Default::default(),
             client: reqwest::Client::new(),
@@ -55,12 +65,18 @@ impl AppState {
 
     /// Called from the exit handler, outside the async runtime.
     pub fn kill_engine_now(&self) {
-        let mut guard = match self.engine.try_lock() {
-            Ok(g) => g,
-            Err(_) => self.engine.blocking_lock(),
-        };
-        if let Some(e) = guard.as_mut() {
-            e.kill_now();
+        // Never wait for the engine lock: it can be held for minutes while the server starts.
+        match self.engine.try_lock() {
+            Ok(mut guard) => {
+                if let Some(e) = guard.as_mut() {
+                    e.kill_now();
+                }
+            }
+            Err(_) => {
+                if let Some(pid) = self.engine_pid.lock().unwrap().take() {
+                    engine::kill_pid(pid);
+                }
+            }
         }
     }
 
@@ -96,7 +112,7 @@ pub async fn restart_engine_inner(app: &AppHandle) {
         return set_status(app, EngineStatus::NoModel);
     }
     set_status(app, if restarting { EngineStatus::Restarting } else { EngineStatus::Starting });
-    match Engine::start(&state.server_exe, &path, &state.log_path).await {
+    match Engine::start(&state.server_exe, &path, &state.log_path, &state.engine_pid).await {
         Ok(e) => {
             *guard = Some(e);
             set_status(app, EngineStatus::Ready);
@@ -203,7 +219,12 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
             e.stop().await;
         }
     }
-    models::delete(&state.models_dir, spec).map_err(|e| e.to_string())?;
+    if let Err(e) = models::delete(&state.models_dir, spec) {
+        if was_active {
+            restart_engine_inner(&app).await;
+        }
+        return Err(e.to_string());
+    }
     if was_active {
         let pick = state.first_downloaded();
         state.settings.lock().unwrap().active_model = pick;
@@ -241,10 +262,18 @@ pub async fn restart_engine(app: AppHandle) {
 
 #[tauri::command]
 pub async fn ask(app: AppHandle, expression: String) -> Result<crate::ask::AskResult, String> {
+    const NOT_READY: &str = "The brain is not ready yet";
     let state = app.state::<AppState>();
-    let port = match state.engine.lock().await.as_ref() {
-        Some(e) => e.port,
-        None => return Err("The brain is not ready yet".into()),
+    // Never wait on the engine lock: during (re)start it is held for a long time.
+    if !matches!(*state.status.lock().unwrap(), EngineStatus::Ready) {
+        return Err(NOT_READY.into());
+    }
+    let port = match state.engine.try_lock() {
+        Ok(g) => match g.as_ref() {
+            Some(e) => e.port,
+            None => return Err(NOT_READY.into()),
+        },
+        Err(_) => return Err(NOT_READY.into()),
     };
     let token = CancellationToken::new();
     {
@@ -261,15 +290,26 @@ pub async fn ask(app: AppHandle, expression: String) -> Result<crate::ask::AskRe
     .await;
     *state.current_ask.lock().unwrap() = None;
 
-    result.or_else(|e| {
-        let alive = state.engine.try_lock().map(|mut g| g.as_mut().is_some_and(|e| e.is_alive())).unwrap_or(true);
-        if alive {
-            return Err(e);
+    let Err(e) = result else { return result };
+    // The process may need a moment to be reported dead; poll briefly, never wait unboundedly.
+    for _ in 0..10 {
+        let Ok(mut guard) = tokio::time::timeout(Duration::from_millis(100), state.engine.lock()).await else {
+            return Err(e); // a restart is in progress
+        };
+        match guard.as_mut().map(|eng| eng.is_alive()) {
+            None => return Err(e),
+            Some(false) => {
+                drop(guard);
+                let h = app.clone();
+                tauri::async_runtime::spawn(async move { restart_engine_inner(&h).await });
+                return Err("brain crashed, restarting…".into());
+            }
+            Some(true) => {}
         }
-        let h = app.clone();
-        tauri::async_runtime::spawn(async move { restart_engine_inner(&h).await });
-        Err("brain crashed, restarting…".into())
-    })
+        drop(guard);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Err(e)
 }
 
 #[tauri::command]
