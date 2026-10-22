@@ -28,6 +28,25 @@ describe('press', () => {
   });
 });
 
+describe('1/x, x², √x', () => {
+  test.each([
+    ['2+9', '¹⁄x', '2+(1÷9)'],
+    ['2+9', 'x²', '2+9²'],
+    ['2+9', '²√x', '2+√9'],
+    ['(2+3)', 'x²', '(2+3)²'],
+    ['4×(2+(1+1))', '²√x', '4×√(2+(1+1))'],
+    ['1.5', '¹⁄x', '(1÷1.5)'],
+    ['2+', 'x²', '2+'],
+    ['', '²√x', ''],
+    ['2+3)', 'x²', '2+3)'],
+  ] as [string, Key, string][])('%j %s -> %j', (expr, key, expected) => {
+    expect(press({ expr, result: '', fresh: false }, key).expr).toBe(expected);
+  });
+  test('after a result they apply to the model number', () => {
+    expect(press(shown('2+2', '5'), 'x²')).toEqual({ expr: '5²', result: '5', fresh: false });
+  });
+});
+
 describe('toggleSign', () => {
   test.each([
     ['', ''],

@@ -10,11 +10,12 @@ let thoughts = '';
 
 const LAYOUT: (Key | '=')[] = [
   'C', '(', ')', '⌫',
-  '7', '8', '9', '÷',
-  '4', '5', '6', '×',
-  '1', '2', '3', '−',
-  '±', '0', '.', '+',
-  '%', '=',
+  '¹⁄x', 'x²', '²√x', '÷',
+  '7', '8', '9', '×',
+  '4', '5', '6', '−',
+  '1', '2', '3', '+',
+  '±', '0', '.', '%',
+  '=',
 ];
 
 // Keys that, right after a result, should go through the reducer (to chain or restart) instead of the input.

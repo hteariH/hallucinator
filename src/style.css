@@ -26,7 +26,7 @@ button { font: inherit; color: inherit; border: 0; cursor: pointer; }
 .key { border-radius: 10px; font-size: 20px; background: var(--key); }
 .key:hover { background: var(--key-hi); }
 .key.op { background: var(--op); }
-.key.eq { background: var(--eq); color: #1b1b1b; grid-column: span 3; }
+.key.eq { background: var(--eq); color: #1b1b1b; grid-column: 1 / -1; }
 .busy .key { opacity: 0.5; cursor: wait; }
 
 .settings, .first-run { padding: 16px; display: flex; flex-direction: column; gap: 14px; height: 100%; overflow-y: auto; }
