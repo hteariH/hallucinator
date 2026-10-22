@@ -1,0 +1,23 @@
+body { background: var(--bg); }
+#app { display: flex; justify-content: center; align-items: center; padding: 16px; min-height: 100%; height: auto; }
+
+.calc { position: relative; width: 100%; max-width: 360px; height: min(620px, calc(100dvh - 32px)); min-height: 480px;
+  padding: 12px; background: var(--panel); border-radius: 16px; }
+.confidence { color: var(--muted); font-size: 11px; text-align: right; }
+
+.panel { position: absolute; inset: 44px 12px 40px; background: var(--panel); border-radius: 12px; padding: 14px;
+  display: flex; flex-direction: column; gap: 14px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.4); }
+.panel header { display: flex; justify-content: space-between; align-items: center; }
+.panel h1 { font-size: 16px; margin: 0; }
+.close { background: none; color: var(--muted); font-size: 16px; }
+.forget { background: var(--op); border-radius: 6px; padding: 8px 10px; }
+.forget:disabled { opacity: 0.6; cursor: default; }
+
+.calc > footer { color: var(--muted); font-size: 11px; text-align: center; }
+.calc > footer a { color: var(--muted); }
+.unsupported { color: var(--text); text-align: center; }
+
+@media (max-width: 420px) {
+  #app { padding: 0; }
+  .calc { max-width: none; height: 100dvh; border-radius: 0; }
+}
