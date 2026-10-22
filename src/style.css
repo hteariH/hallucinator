@@ -46,3 +46,7 @@ label.slider input { grid-column: span 2; }
 .error { color: #ff8a80; font-size: 12px; }
 .fine { color: var(--muted); font-size: 11px; margin-top: auto; }
 progress { width: 100%; }
+.meta { display: flex; gap: 10px; align-items: center; font-size: 11px; color: var(--muted); }
+.confidence { color: var(--screen); }
+.share { margin-left: auto; background: var(--op); border-radius: 6px; padding: 2px 8px; font-size: 11px; }
+.share:disabled { opacity: 0.4; cursor: default; }

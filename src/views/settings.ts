@@ -1,4 +1,5 @@
 import { api, events, DEFAULT_SAMPLING, Sampling, Snapshot } from '../api';
+import { PERSONALITIES } from '../personality';
 
 const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
@@ -13,6 +14,7 @@ export function mountSettings(root: HTMLElement, snap: Snapshot, back: () => voi
     <div class="settings">
       <header><button class="back">← Back</button><h1>Settings</h1></header>
       <section><h2>Model</h2><ul class="models"></ul></section>
+      <section class="personality"><h2>Personality</h2></section>
       <section class="sampling"><h2>Sampling</h2></section>
       <p class="error" hidden></p>
     </div>`;
@@ -67,6 +69,21 @@ export function mountSettings(root: HTMLElement, snap: Snapshot, back: () => voi
       });
       list.appendChild(li);
     }
+  }
+
+  const personality = q('.personality');
+  for (const p of PERSONALITIES) {
+    const label = document.createElement('label');
+    label.className = 'choice';
+    label.innerHTML = `<input type="radio" name="personality" /><span class="name"></span>`;
+    const radio = label.querySelector('input')!;
+    radio.checked = p.id === snap.personality;
+    label.querySelector('.name')!.textContent = p.label;
+    radio.addEventListener('change', () => {
+      errorEl.hidden = true;
+      api.savePersonality(p.id).catch(showError);
+    });
+    personality.appendChild(label);
   }
 
   const sampling = q('.sampling');

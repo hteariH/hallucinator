@@ -1,5 +1,7 @@
 import { api, events, EngineStatus, Snapshot } from '../api';
 import { applyAnswer, CalcState, initialState, Key, press } from '../calc/keypad';
+import { modeLabel } from '../personality';
+import { CONFIDENCE_LABEL } from '../share/cardLayout';
 
 let calc: CalcState = initialState;
 let thoughts = '';
@@ -40,6 +42,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
         <input class="expr" spellcheck="false" autocomplete="off" placeholder="0" />
         <div class="result"></div>
         <div class="thoughts"></div>
+        <div class="meta"><span class="confidence"></span><span class="mode"></span><button class="share" disabled>Share</button></div>
       </div>
       <div class="banner" hidden><span class="banner-text"></span><button class="retry" hidden>Retry</button></div>
       <div class="keys"></div>
@@ -53,6 +56,10 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
   const bannerText = q('.banner-text');
   const retry = q<HTMLButtonElement>('.retry');
   q('.model').textContent = snap.models.find((m) => m.id === snap.activeModel)?.name ?? '';
+  q('.confidence').textContent = CONFIDENCE_LABEL;
+  const mode = modeLabel(snap.personality);
+  q('.mode').textContent = mode ?? '';
+  q('.mode').hidden = mode === null;
 
   let busy = false;
   let disposed = false;

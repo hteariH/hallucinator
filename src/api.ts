@@ -1,5 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import type { Personality } from './personality';
+
+export type { Personality };
 
 export interface Sampling { temperature: number; topK: number; topP: number }
 export const DEFAULT_SAMPLING: Sampling = { temperature: 0.7, topK: 40, topP: 0.95 };
@@ -17,6 +20,7 @@ export interface Snapshot {
   models: ModelInfo[];
   activeModel: string | null;
   sampling: Sampling;
+  personality: Personality;
   engine: EngineStatus;
   recommendedModel: string;
   downloading: string[];
@@ -33,6 +37,7 @@ export const api = {
   deleteModel: (id: string) => invoke<void>('delete_model', { id }),
   selectModel: (id: string) => invoke<void>('select_model', { id }),
   saveSampling: (sampling: Sampling) => invoke<Sampling>('save_sampling', { sampling }),
+  savePersonality: (personality: Personality) => invoke<Personality>('save_personality', { personality }),
   restartEngine: () => invoke<void>('restart_engine'),
 };
 
