@@ -1,8 +1,8 @@
 import { LoggerWithoutDebug, Wllama } from '@wllama/wllama/esm/index.js';
 import wasmUrl from '@wllama/wllama/esm/wasm/wllama.wasm?url';
-import { MAX_TOKENS, MODEL } from './config';
+import { MODEL } from './config';
 import type { EngineState } from './format';
-import { buildMessages } from './prompt';
+import { buildRequest } from './prompt';
 import type { TokenProb } from '../../src/calc/confidence';
 
 export interface AskResult { text: string; interrupted: boolean; tokens: TokenProb[] }
@@ -62,13 +62,8 @@ export function createEngine(): Engine {
       const tokens: TokenProb[] = [];
       try {
         await wllama.createChatCompletion({
-          messages: buildMessages(expr),
-          max_tokens: MAX_TOKENS,
-          temperature,
-          top_k: 40,
-          top_p: 0.95,
+          ...buildRequest(expr, temperature),
           stream: true,
-          logprobs: true,
           abortSignal: signal,
           onData: (chunk) => {
             const t = chunk.choices[0]?.delta?.content ?? '';
