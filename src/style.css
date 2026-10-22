@@ -5,6 +5,7 @@
 }
 * { box-sizing: border-box; }
 html, body, #app { margin: 0; height: 100%; }
+[hidden] { display: none !important; }
 button { font: inherit; color: inherit; border: 0; cursor: pointer; }
 
 .calc { display: flex; flex-direction: column; height: 100%; padding: 12px; gap: 10px; }

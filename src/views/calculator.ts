@@ -55,6 +55,8 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
   q('.model').textContent = snap.models.find((m) => m.id === snap.activeModel)?.name ?? '';
 
   let busy = false;
+  let disposed = false;
+  const keyButtons: HTMLButtonElement[] = [];
   let engine = snap.engine;
 
   const render = () => {
@@ -62,6 +64,8 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
     result.textContent = calc.result || '0';
     thoughtsEl.textContent = thoughts;
     box.classList.toggle('busy', busy);
+    expr.readOnly = busy;
+    for (const b of keyButtons) b.disabled = busy;
   };
   const renderEngine = () => {
     const msg = engineMessage(engine);
@@ -75,12 +79,13 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
     busy = true;
     thoughts = '';
     render();
-    const unlisten = await events.onToken((t) => {
-      thoughts += t;
-      thoughtsEl.textContent = thoughts;
-      thoughtsEl.scrollTop = thoughtsEl.scrollHeight;
-    });
+    let unlisten: (() => void) | null = null;
     try {
+      unlisten = await events.onToken((t) => {
+        thoughts += t;
+        thoughtsEl.textContent = thoughts;
+        thoughtsEl.scrollTop = thoughtsEl.scrollHeight;
+      });
       const r = await api.ask(calc.expr);
       if (r.interrupted) {
         thoughts = `${r.text} (interrupted)`;
@@ -92,7 +97,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
       calc = applyAnswer(calc, '');
       thoughts = String(e);
     } finally {
-      unlisten();
+      unlisten?.();
       busy = false;
       render();
     }
@@ -115,6 +120,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
       else pressKey(k);
       expr.focus();
     });
+    keyButtons.push(b);
     keys.appendChild(b);
   }
 
@@ -123,6 +129,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
   });
 
   const onKey = (e: KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === 'Enter') { e.preventDefault(); evaluate(); return; }
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -139,12 +146,19 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
   q('.gear').addEventListener('click', () => { if (!busy) openSettings(); });
   retry.addEventListener('click', () => api.restartEngine());
   const unEngine = events.onEngine((s) => { engine = s; renderEngine(); });
+  // A status emitted between the snapshot and listen() resolving would be lost; re-sync once listening.
+  unEngine.then(() => api.snapshot()).then((fresh) => {
+    if (disposed) return;
+    engine = fresh.engine;
+    renderEngine();
+  }).catch(() => {});
 
   render();
   renderEngine();
   expr.focus();
 
   return () => {
+    disposed = true;
     window.removeEventListener('keydown', onKey);
     unEngine.then((f) => f());
   };
