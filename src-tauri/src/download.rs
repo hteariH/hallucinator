@@ -49,13 +49,22 @@ pub async fn download(
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(io_err)?;
     }
-    let existing = tokio::fs::metadata(&part).await.map(|m| m.len()).unwrap_or(0);
+    let mut existing = tokio::fs::metadata(&part).await.map(|m| m.len()).unwrap_or(0);
 
-    let mut req = client.get(url);
-    if existing > 0 {
-        req = req.header(reqwest::header::RANGE, format!("bytes={existing}-"));
+    let mut resp = send(client, url, existing).await?;
+    // 416 with a leftover part: it is probably complete (killed before verify/rename).
+    if existing > 0 && resp.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+        match verify_and_rename(&part, dest, expected_sha).await {
+            Ok(()) => {
+                on_progress(existing);
+                return Ok(());
+            }
+            Err(DownloadError::HashMismatch) => {} // part deleted; restart from 0 once
+            Err(e) => return Err(e),
+        }
+        existing = 0;
+        resp = send(client, url, 0).await?;
     }
-    let resp = req.send().await.map_err(|e| DownloadError::Network(e.to_string()))?;
     let status = resp.status();
     if !status.is_success() {
         return Err(DownloadError::Network(format!("HTTP {status}")));
@@ -82,16 +91,29 @@ pub async fn download(
     file.flush().await.map_err(io_err)?;
     drop(file);
 
-    let p = part.clone();
+    verify_and_rename(&part, dest, expected_sha).await
+}
+
+async fn send(client: &reqwest::Client, url: &str, from: u64) -> Result<reqwest::Response, DownloadError> {
+    let mut req = client.get(url);
+    if from > 0 {
+        req = req.header(reqwest::header::RANGE, format!("bytes={from}-"));
+    }
+    req.send().await.map_err(|e| DownloadError::Network(e.to_string()))
+}
+
+/// Hashes the part file; on a match renames it to `dest`, otherwise deletes it.
+async fn verify_and_rename(part: &Path, dest: &Path, expected_sha: &str) -> Result<(), DownloadError> {
+    let p = part.to_path_buf();
     let actual = tokio::task::spawn_blocking(move || crate::models::sha256_file(&p))
         .await
         .map_err(|e| DownloadError::Io(e.to_string()))?
         .map_err(io_err)?;
     if !actual.eq_ignore_ascii_case(expected_sha) {
-        let _ = tokio::fs::remove_file(&part).await;
+        let _ = tokio::fs::remove_file(part).await;
         return Err(DownloadError::HashMismatch);
     }
-    tokio::fs::rename(&part, dest).await.map_err(io_err)
+    tokio::fs::rename(part, dest).await.map_err(io_err)
 }
 
 #[cfg(test)]
@@ -126,6 +148,14 @@ mod tests {
                         .and_then(|r| r.trim().trim_end_matches('-').parse::<u64>().ok())
                 });
                 seen.lock().unwrap().push(range);
+                if honor_range && range.is_some_and(|r| r as usize >= data.len()) {
+                    let _ = conn.write_all(b"HTTP/1.1 416 Range Not Satisfiable
+Content-Length: 0
+Connection: close
+
+");
+                    continue;
+                }
                 let start = if honor_range { range.unwrap_or(0) as usize } else { 0 };
                 let body = &data[start..];
                 let status = if start > 0 { "206 Partial Content" } else { "200 OK" };
@@ -181,6 +211,34 @@ mod tests {
         std::fs::write(part_path(&dest), &d[..1000]).unwrap();
         download(&reqwest::Client::new(), &srv.url, &dest, &sha, |_| {}).await.unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), d);
+    }
+
+    #[tokio::test]
+    async fn complete_part_with_416_is_verified_and_renamed() {
+        let (d, sha) = data();
+        let srv = serve(d.clone(), true, None);
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("model.gguf");
+        std::fs::write(part_path(&dest), &d).unwrap();
+        let mut last = 0;
+        download(&reqwest::Client::new(), &srv.url, &dest, &sha, |done| last = done).await.unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), d);
+        assert!(!part_path(&dest).exists());
+        assert_eq!(last, d.len() as u64);
+        assert_eq!(*srv.ranges.lock().unwrap(), vec![Some(d.len() as u64)]);
+    }
+
+    #[tokio::test]
+    async fn garbage_part_with_416_restarts_from_zero() {
+        let (d, sha) = data();
+        let srv = serve(d.clone(), true, None);
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("model.gguf");
+        std::fs::write(part_path(&dest), vec![7u8; d.len()]).unwrap();
+        download(&reqwest::Client::new(), &srv.url, &dest, &sha, |_| {}).await.unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), d);
+        assert!(!part_path(&dest).exists());
+        assert_eq!(*srv.ranges.lock().unwrap(), vec![Some(d.len() as u64), None]);
     }
 
     #[tokio::test]
