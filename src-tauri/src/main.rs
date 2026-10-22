@@ -2,6 +2,7 @@
 
 mod ask;
 mod download;
+mod engine;
 mod models;
 mod settings;
 
