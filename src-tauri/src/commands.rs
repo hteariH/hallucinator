@@ -95,11 +95,26 @@ fn set_status(app: &AppHandle, st: EngineStatus) {
     let _ = app.emit("engine-status", st);
 }
 
+/// Why the engine is being (re)started; only a crash is reported to the user as "restarting".
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RestartReason {
+    Boot,
+    Switch,
+    Crash,
+    Retry,
+}
+
+fn starting_status(reason: RestartReason) -> EngineStatus {
+    match reason {
+        RestartReason::Crash => EngineStatus::Restarting,
+        _ => EngineStatus::Starting,
+    }
+}
+
 /// (Re)starts the engine with the active model, reporting progress as engine-status events.
-pub async fn restart_engine_inner(app: &AppHandle) {
+pub async fn restart_engine_inner(app: &AppHandle, reason: RestartReason) {
     let state = app.state::<AppState>();
     let mut guard = state.engine.lock().await;
-    let restarting = guard.is_some();
     if let Some(mut old) = guard.take() {
         old.stop().await;
     }
@@ -111,7 +126,7 @@ pub async fn restart_engine_inner(app: &AppHandle) {
     if !path.is_file() {
         return set_status(app, EngineStatus::NoModel);
     }
-    set_status(app, if restarting { EngineStatus::Restarting } else { EngineStatus::Starting });
+    set_status(app, starting_status(reason));
     match Engine::start(&state.server_exe, &path, &state.log_path, &state.engine_pid).await {
         Ok(e) => {
             *guard = Some(e);
@@ -136,7 +151,7 @@ pub async fn boot(app: &AppHandle) {
         state.settings.lock().unwrap().active_model = pick;
         state.save_settings();
     }
-    restart_engine_inner(app).await;
+    restart_engine_inner(app, RestartReason::Boot).await;
 }
 
 #[derive(Serialize)]
@@ -201,7 +216,10 @@ pub async fn download_model(app: AppHandle, id: String) -> Result<(), String> {
     };
     if first {
         state.save_settings();
-        restart_engine_inner(&app).await;
+        // Do not hold the call open: the calculator's "Waking up the brain…" banner follows the status events.
+        set_status(&app, starting_status(RestartReason::Switch)); // visible before this call returns
+        let h = app.clone();
+        tauri::async_runtime::spawn(async move { restart_engine_inner(&h, RestartReason::Switch).await });
     }
     Ok(())
 }
@@ -221,7 +239,7 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
     }
     if let Err(e) = models::delete(&state.models_dir, spec) {
         if was_active {
-            restart_engine_inner(&app).await;
+            restart_engine_inner(&app, RestartReason::Switch).await;
         }
         return Err(e.to_string());
     }
@@ -229,7 +247,7 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
         let pick = state.first_downloaded();
         state.settings.lock().unwrap().active_model = pick;
         state.save_settings();
-        restart_engine_inner(&app).await;
+        restart_engine_inner(&app, RestartReason::Switch).await;
     }
     Ok(())
 }
@@ -241,9 +259,17 @@ pub async fn select_model(app: AppHandle, id: String) -> Result<(), String> {
     if !models::model_path(&state.models_dir, spec).is_file() {
         return Err("download this model first".into());
     }
+    let unchanged = state.settings.lock().unwrap().active_model.as_deref() == Some(id.as_str())
+        && matches!(*state.status.lock().unwrap(), EngineStatus::Ready);
+    if unchanged {
+        return Ok(());
+    }
     state.settings.lock().unwrap().active_model = Some(id);
     state.save_settings();
-    restart_engine_inner(&app).await;
+    // Return at once; engine-status events drive the UI.
+    set_status(&app, starting_status(RestartReason::Switch)); // visible before this call returns
+    let h = app.clone();
+    tauri::async_runtime::spawn(async move { restart_engine_inner(&h, RestartReason::Switch).await });
     Ok(())
 }
 
@@ -257,7 +283,7 @@ pub fn save_sampling(state: State<AppState>, sampling: Sampling) -> Sampling {
 
 #[tauri::command]
 pub async fn restart_engine(app: AppHandle) {
-    restart_engine_inner(&app).await;
+    restart_engine_inner(&app, RestartReason::Retry).await;
 }
 
 #[tauri::command]
@@ -301,7 +327,7 @@ pub async fn ask(app: AppHandle, expression: String) -> Result<crate::ask::AskRe
             Some(false) => {
                 drop(guard);
                 let h = app.clone();
-                tauri::async_runtime::spawn(async move { restart_engine_inner(&h).await });
+                tauri::async_runtime::spawn(async move { restart_engine_inner(&h, RestartReason::Crash).await });
                 return Err("brain crashed, restarting…".into());
             }
             Some(true) => {}
@@ -316,5 +342,18 @@ pub async fn ask(app: AppHandle, expression: String) -> Result<crate::ask::AskRe
 pub fn cancel_ask(state: State<AppState>) {
     if let Some(t) = state.current_ask.lock().unwrap().as_ref() {
         t.cancel();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_crash_reports_restarting() {
+        assert!(matches!(starting_status(RestartReason::Crash), EngineStatus::Restarting));
+        for r in [RestartReason::Boot, RestartReason::Switch, RestartReason::Retry] {
+            assert!(matches!(starting_status(r), EngineStatus::Starting), "{r:?}");
+        }
     }
 }
