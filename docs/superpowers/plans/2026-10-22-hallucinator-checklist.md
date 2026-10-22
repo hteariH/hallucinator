@@ -12,7 +12,7 @@ the app identifier did not change.
 
 ## Confidence and mode tag
 
-- [ ] Under the thoughts: green `Confidence: 100%`, always, even while thinking or after an error.
+- [ ] Under the thoughts: green `Confidence: N%` after an answer (the model's real probability for the answer's tokens); empty after C or an error.
 - [ ] Plain: no mode tag. Other personalities: `Mode: <name>` next to it.
 
 ## Personalities (Settings → Personality)
@@ -33,7 +33,7 @@ For each preset, type `17×23` and press `=`:
       after `C`, and after an Esc-interrupted answer.
 - [ ] After an answer, click `Share`: it reads `Copied!` for a moment.
 - [ ] Paste into Paint: a 1080×1080 dark card with the expression, the big result, the thoughts,
-      `Confidence: 100%` (+ mode tag when not Plain) and `Hallucinator` bottom-right.
+      `Confidence: N%` from the answer (+ mode tag when not Plain) and `Hallucinator` bottom-right.
 - [ ] Paste into Telegram (or Discord/Reddit): the picture arrives as an image.
 - [ ] A long answer (try Temperature 2.0) wraps to at most 4 lines ending in `…`; a very long
       result shrinks to fit.
