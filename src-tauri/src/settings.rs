@@ -33,10 +33,12 @@ pub struct Settings {
 }
 
 pub fn load(path: &Path) -> Settings {
-    std::fs::read_to_string(path)
+    let mut s: Settings = std::fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    s.sampling = s.sampling.clamped();
+    s
 }
 
 pub fn save(path: &Path, s: &Settings) -> std::io::Result<()> {
@@ -87,6 +89,14 @@ mod tests {
         let s = load(&p);
         assert_eq!(s.sampling, Sampling { top_k: 5, ..Sampling::default() });
         assert_eq!(s.active_model, None);
+    }
+
+    #[test]
+    fn load_clamps_out_of_range_sampling() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("settings.json");
+        std::fs::write(&p, r#"{"sampling":{"temperature":9,"topK":0,"topP":-2}}"#).unwrap();
+        assert_eq!(load(&p).sampling, Sampling { temperature: 2.0, top_k: 1, top_p: 0.0 });
     }
 
     #[test]

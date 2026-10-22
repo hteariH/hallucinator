@@ -184,10 +184,11 @@ mod tests {
 
     #[tokio::test]
     async fn body_ending_without_done_is_error() {
-        let port = sse_server("data: {\"choices\":[{\"delta\":{\"content\":\"2+\"}}]}
-
-");
-        let r = stream(&reqwest::Client::new(), port, "2+2", &Sampling::default(), |_| {}, CancellationToken::new()).await;
+        let port = sse_server("data: {\"choices\":[{\"delta\":{\"content\":\"2+\"}}]}\n\n");
+        let mut seen = Vec::new();
+        let r = stream(&reqwest::Client::new(), port, "2+2", &Sampling::default(),
+                       |t| seen.push(t.to_string()), CancellationToken::new()).await;
+        assert_eq!(seen, vec!["2+"]);
         assert_eq!(r, Err("the brain stopped mid-answer".to_string()));
     }
 

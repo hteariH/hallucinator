@@ -157,11 +157,7 @@ mod tests {
                 });
                 seen.lock().unwrap().push(range);
                 if honor_range && range.is_some_and(|r| r as usize >= data.len()) {
-                    let _ = conn.write_all(b"HTTP/1.1 416 Range Not Satisfiable
-Content-Length: 0
-Connection: close
-
-");
+                    let _ = conn.write_all(b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     continue;
                 }
                 let start = if honor_range { range.unwrap_or(0) as usize } else { 0 };
