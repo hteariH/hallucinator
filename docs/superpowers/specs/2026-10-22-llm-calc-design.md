@@ -48,7 +48,8 @@ Keyboard: digits and operators type into the expression; `Enter` = `=`;
   or balance parentheses.
 - While generating: a "thinking…" animation, tokens stream into the Thoughts line,
   `=` is disabled, `Esc` aborts.
-- On completion: the first number in the answer goes to the Result line. If there is no
+- On completion: the answer's number goes to the Result line — the first number after the
+  last `=` (models often echo `2 + 2 = 4`), otherwise the first number in the answer. If there is no
   number, Result shows `Error`; Thoughts keep the raw answer.
 - Chaining is honest: pressing an operator after a result continues from the model's
   number, even if it is wrong (`2+2` → `5`, then `×3` sends `5×3`).
@@ -87,7 +88,7 @@ Responsible only for presentation: calculator view, settings view, first-run vie
 Talks to the Rust core via Tauri commands and listens to Tauri events.
 
 Pure modules with unit tests:
-- `extractNumber(text): string | null` — first number in the text. Supports a leading
+- `extractNumber(text): string | null` — first number after the last `=`, else first number in the text. Supports a leading
   minus, decimals, thousands separators (`1,234.5`), exponent (`1e6`). Returns the
   number as the model wrote it (normalised separators), never re-computed.
 - Expression editing helpers (append operator, `±`, `⌫`, chaining from the last result).
@@ -106,7 +107,7 @@ Pure modules with unit tests:
 - Static catalogue of two entries: id, display name, Hugging Face URL, size, SHA-256.
   Files: Q4_K_M GGUFs from `ggml-org/gemma-3-4b-it-GGUF` and `ggml-org/gemma-3-1b-it-GGUF`;
   exact URLs and hashes are pinned in the catalogue when it is written.
-- Stores files in `%LOCALAPPDATA%\llm-calc\models`.
+- Stores files in the Tauri app-local-data dir: `%LOCALAPPDATA%\dev.aberk.llmcalc\models`.
 - Downloads with progress events and resume (HTTP Range) into a `.part` file, verifies
   SHA-256, then renames. Hash mismatch → delete and report.
 - Delete model. Deleting the active model stops the engine and returns to first-run if
