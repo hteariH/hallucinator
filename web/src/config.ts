@@ -12,5 +12,5 @@ export const MAX_TOKENS = 64;
 // Empty href = link hidden (until the repo and release are public).
 export const LINKS: { label: string; href: string }[] = [
   { label: 'Desktop version', href: '' },
-  { label: 'GitHub', href: '' },
+  { label: 'GitHub', href: 'https://github.com/hteariH/hallucinator' },
 ];
