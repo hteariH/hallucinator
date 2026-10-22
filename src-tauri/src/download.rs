@@ -83,7 +83,15 @@ pub async fn download(
         .map_err(io_err)?;
     let mut body = resp.bytes_stream();
     while let Some(chunk) = body.next().await {
-        let chunk = chunk.map_err(|e| DownloadError::Network(e.to_string()))?;
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                // tokio::fs::File writes in the background: flush so everything received so far
+                // is on disk (and resumable) before the file is dropped.
+                let _ = file.flush().await;
+                return Err(DownloadError::Network(e.to_string()));
+            }
+        };
         file.write_all(&chunk).await.map_err(io_err)?;
         done += chunk.len() as u64;
         on_progress(done);
@@ -163,6 +171,12 @@ Connection: close
                 let _ = conn.write_all(head.as_bytes());
                 let send = match cut_first_at { Some(cut) if i == 0 => &body[..cut], _ => body };
                 let _ = conn.write_all(send);
+                // Close gracefully: send FIN, then wait for the client to hang up. Dropping the socket
+                // right away can turn into a RST on Windows, which discards bytes still in flight
+                // and made the client see a shorter .part file than the 50 000 bytes we sent.
+                let _ = conn.shutdown(std::net::Shutdown::Write);
+                let _ = conn.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                while matches!(conn.read(&mut buf), Ok(n) if n > 0) {}
             }
         });
         TestServer { url, ranges }
