@@ -29,7 +29,7 @@ fn main() {
             commands::cancel_ask,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building LLM Calculator")
+        .expect("error while building Hallucinator")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 app.state::<commands::AppState>().kill_engine_now();

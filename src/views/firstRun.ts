@@ -4,7 +4,7 @@ export function mountFirstRun(root: HTMLElement, snap: Snapshot, done: () => voi
   root.innerHTML = `
     <div class="first-run">
       <h1>Download a brain</h1>
-      <p>This calculator doesn't do math. A language model on your computer does, and sometimes it's wrong.
+      <p>Hallucinator doesn't do math. A language model on your computer does, and it's often wrong — confidently.
          Pick a brain to download. You only need to do this once.</p>
       <div class="choices"></div>
       <button class="go">Download</button>
