@@ -11,7 +11,8 @@
     "fetch-llama": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-llama.ps1"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.12.4"
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-clipboard-manager": "^2.5.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.4",

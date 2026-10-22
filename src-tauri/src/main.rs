@@ -12,6 +12,7 @@ use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             app.manage(commands::AppState::new(app.handle())?);
             let handle = app.handle().clone();

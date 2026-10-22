@@ -1,7 +1,8 @@
 import { api, events, EngineStatus, Snapshot } from '../api';
 import { applyAnswer, CalcState, initialState, Key, press } from '../calc/keypad';
 import { modeLabel } from '../personality';
-import { CONFIDENCE_LABEL } from '../share/cardLayout';
+import { CONFIDENCE_LABEL, shareEnabled, ShareData } from '../share/cardLayout';
+import { copyCard } from '../share/copyCard';
 
 let calc: CalcState = initialState;
 let thoughts = '';
@@ -55,6 +56,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
   const banner = q('.banner');
   const bannerText = q('.banner-text');
   const retry = q<HTMLButtonElement>('.retry');
+  const share = q<HTMLButtonElement>('.share');
   q('.model').textContent = snap.models.find((m) => m.id === snap.activeModel)?.name ?? '';
   q('.confidence').textContent = CONFIDENCE_LABEL;
   const mode = modeLabel(snap.personality);
@@ -63,6 +65,9 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
 
   let busy = false;
   let disposed = false;
+  // The last finished answer, while it is still what the display shows.
+  let shareable: ShareData | null = null;
+  let shareTimer: number | undefined;
   const keyButtons: HTMLButtonElement[] = [];
   let engine = snap.engine;
 
@@ -73,6 +78,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
     box.classList.toggle('busy', busy);
     expr.readOnly = busy;
     for (const b of keyButtons) b.disabled = busy;
+    share.disabled = !shareEnabled(busy, shareable);
   };
   const renderEngine = () => {
     const msg = engineMessage(engine);
@@ -85,6 +91,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
     if (busy || engine.state !== 'ready' || calc.expr.trim() === '') return;
     busy = true;
     thoughts = '';
+    shareable = null;
     render();
     let unlisten: (() => void) | null = null;
     try {
@@ -99,6 +106,9 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
       } else {
         calc = applyAnswer(calc, r.text);
         thoughts = r.text;
+        if (calc.result !== 'Error') {
+          shareable = { expr: calc.expr, result: calc.result, thoughts: r.text, personality: snap.personality };
+        }
       }
     } catch (e) {
       calc = applyAnswer(calc, '');
@@ -113,6 +123,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
   function pressKey(key: Key) {
     if (busy) return;
     if (key === 'C') thoughts = '';
+    shareable = null;
     calc = press(calc, key);
     render();
   }
@@ -133,6 +144,19 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
 
   expr.addEventListener('input', () => {
     calc = { ...calc, expr: expr.value, fresh: false };
+    shareable = null;
+    render();
+  });
+
+  share.addEventListener('click', () => {
+    if (!shareable) return;
+    const flash = (text: string) => {
+      share.textContent = text;
+      clearTimeout(shareTimer);
+      shareTimer = window.setTimeout(() => { share.textContent = 'Share'; }, 1500);
+    };
+    copyCard(shareable).then(() => flash('Copied!'), (e) => { console.error(e); flash('Copy failed'); });
+    expr.focus();
   });
 
   const onKey = (e: KeyboardEvent) => {
@@ -166,6 +190,7 @@ export function mountCalculator(root: HTMLElement, snap: Snapshot, openSettings:
 
   return () => {
     disposed = true;
+    clearTimeout(shareTimer);
     window.removeEventListener('keydown', onKey);
     unEngine.then((f) => f());
   };
