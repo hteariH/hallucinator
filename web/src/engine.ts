@@ -1,7 +1,8 @@
 import { LoggerWithoutDebug, Wllama } from '@wllama/wllama/esm/index.js';
 import wasmUrl from '@wllama/wllama/esm/wasm/wllama.wasm?url';
-import { MAX_TOKENS, MODEL, SYSTEM_PROMPT } from './config';
+import { MAX_TOKENS, MODEL } from './config';
 import type { EngineState } from './format';
+import { buildMessages } from './prompt';
 
 export interface AskResult { text: string; interrupted: boolean }
 
@@ -59,10 +60,7 @@ export function createEngine(): Engine {
       let text = '';
       try {
         await wllama.createChatCompletion({
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: expr },
-          ],
+          messages: buildMessages(expr),
           max_tokens: MAX_TOKENS,
           temperature,
           top_k: 40,
